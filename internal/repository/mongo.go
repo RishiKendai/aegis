@@ -38,3 +38,7 @@ func (r *MongoRepository) CountDocuments(ctx context.Context, collection string,
 func (r *MongoRepository) GetCollection(collectionName string) *mongo.Collection {
 	return r.db.Collection(collectionName)
 }
+
+func (r *MongoRepository) UpdateOne(ctx context.Context, collection string, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return r.db.Collection(collection).UpdateOne(ctx, filter, update, opts...)
+}

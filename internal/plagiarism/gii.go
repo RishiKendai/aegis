@@ -1,14 +1,15 @@
 package plagiarism
 
 import (
+	"fmt"
+
 	"github.com/RishiKendai/aegis/internal/models"
+	"github.com/rs/zerolog/log"
 )
 
 // GII (Global Inverted Index) maps hash → [submission_ids]
 type GII map[string][]string
 
-// BuildGII builds Global Inverted Index from artifacts
-// Optimization: Skip hashes that appear in only 1 candidate
 func BuildGII(artifacts []*models.Artifact) GII {
 	gii := make(GII)
 
@@ -19,9 +20,18 @@ func BuildGII(artifacts []*models.Artifact) GII {
 		}
 
 		attemptID := artifact.AttemptID
+		seenHashes := make(map[string]bool)
 		for _, hashEntry := range artifact.Fingerprints.Hashes {
 			hash := hashEntry.Hash
-			gii[hash] = append(gii[hash], attemptID)
+			if !seenHashes[hash] {
+				seenHashes[hash] = true
+				gii[hash] = append(gii[hash], attemptID)
+				log.Trace().
+					Str("hash", hash).
+					Str("Email ", artifact.Email).
+					Str("attemptID", fmt.Sprintf("%+v", gii[hash])).
+					Msg("gii hash")
+			}
 		}
 	}
 
@@ -48,13 +58,12 @@ func GetWorthyPairs(gii GII, artifacts []*models.Artifact, difficulty string) []
 	// Get threshold based on difficulty
 	threshold := getWorthyThreshold(difficulty)
 
-	// Build pair map to avoid duplicates
-	pairMap := make(map[string]Pair)
+	sharedPairCount := make(map[string]int)
+	pairArtifacts := make(map[string]Pair)
 
-	// For each hash with 2+ candidates, find pairs
 	for _, attemptIDs := range gii {
 		if len(attemptIDs) < 2 {
-			continue // Skip (shouldn't happen after filtering, but safety check)
+			continue
 		}
 
 		// Get artifacts for this hash
@@ -71,33 +80,36 @@ func GetWorthyPairs(gii GII, artifacts []*models.Artifact, difficulty string) []
 				artifactA := hashArtifacts[i]
 				artifactB := hashArtifacts[j]
 
-				// Calculate overlap
-				overlap := calculateOverlap(artifactA, artifactB)
-				if overlap >= threshold {
-					// Create pair key (sorted to avoid duplicates)
-					pairKey := getPairKey(artifactA.AttemptID, artifactB.AttemptID)
-					if _, exists := pairMap[pairKey]; !exists {
-						pairMap[pairKey] = Pair{
-							ArtifactA: artifactA,
-							ArtifactB: artifactB,
-						}
+				pairKey := getPairKey(artifactA.AttemptID, artifactB.AttemptID)
+				sharedPairCount[pairKey]++
+				if _, exists := pairArtifacts[pairKey]; !exists {
+					pairArtifacts[pairKey] = Pair{
+						ArtifactA: artifactA,
+						ArtifactB: artifactB,
 					}
 				}
+				log.Trace().
+					Str("pairKey", pairKey).
+					Int("sharedPairCount", sharedPairCount[pairKey]).
+					Msg("shared pair count")
 			}
 		}
 	}
 
 	// Convert map to slice
-	worthyPairs := make([]Pair, 0, len(pairMap))
-	for _, pair := range pairMap {
-		worthyPairs = append(worthyPairs, pair)
-	}
+	worthyPairs := make([]Pair, 0)
+	for pairKey, sharedCount := range sharedPairCount {
+		pair := pairArtifacts[pairKey]
+		overlap := calculateOverlap(pair.ArtifactA, pair.ArtifactB, sharedCount)
 
+		if overlap >= threshold {
+			worthyPairs = append(worthyPairs, pair)
+		}
+	}
 	return worthyPairs
 }
 
-// calculateOverlap calculates shared_hashes / min(total_hashes_A, total_hashes_B)
-func calculateOverlap(artifactA, artifactB *models.Artifact) float64 {
+func calculateOverlap(artifactA, artifactB *models.Artifact, sharedCount int) float64 {
 	if artifactA.Fingerprints == nil || artifactB.Fingerprints == nil {
 		return 0.0
 	}
@@ -112,13 +124,6 @@ func calculateOverlap(artifactA, artifactB *models.Artifact) float64 {
 		hashesB[hashEntry.Hash] = true
 	}
 
-	sharedCount := 0
-	for hash := range hashesA {
-		if hashesB[hash] {
-			sharedCount++
-		}
-	}
-
 	totalA := len(hashesA)
 	totalB := len(hashesB)
 
@@ -126,15 +131,7 @@ func calculateOverlap(artifactA, artifactB *models.Artifact) float64 {
 		return 0.0
 	}
 
-	minTotal := totalA
-	if totalB < minTotal {
-		minTotal = totalB
-	}
-
-	if minTotal == 0 {
-		return 0.0
-	}
-
+	minTotal := min(totalA, totalB)
 	return float64(sharedCount) / float64(minTotal)
 }
 

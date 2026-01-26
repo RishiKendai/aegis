@@ -64,7 +64,10 @@ func main() {
 	resultsRepo := repository.NewResultsRepository(mongoRepo)
 
 	// Initialize Astra client and preprocessing service
-	astraClient := preprocess.NewAstraClient(cfg.AstraBaseURL, cfg.AstraAPIKey)
+	// astraClient := preprocess.NewAstraClient(cfg.AstraBaseURL, cfg.AstraAPIKey)
+	// Use test file instead of real API
+	astraClient := preprocess.NewAstraClientWithTestFile("test_preprocess_response.json")
+
 	preprocessSvc := preprocess.NewService(astraClient, artifactsRepo)
 
 	// Initialize retry handler

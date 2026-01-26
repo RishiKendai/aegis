@@ -84,6 +84,7 @@ func ComputePlagiarism(
 	candidatePairsMap := make(map[string][]PairSimilarity) // email -> []PairSimilarity
 
 	for qID, langBuckets := range buckets {
+		log.Trace().Str("😁 qId", qID).Msg("langBuckets")
 		for language, bucketArtifacts := range langBuckets {
 			if len(bucketArtifacts) < 2 {
 				// Edge Case: No pairs possible in this bucket
@@ -93,6 +94,15 @@ func ComputePlagiarism(
 			// Build GII (optimization: skip hashes with only 1 candidate)
 			gii := BuildGII(bucketArtifacts)
 
+			for hash, attemptIDs := range gii {
+				log.Trace().
+					Str("🐞🐞 qId", qID).
+					Str("🐞🐞 language", language).
+					Str("hash", hash).
+					Str("🐞🐞 attemptIDs", fmt.Sprintf("%v", attemptIDs)).
+					Msg("gii hash")
+			}
+			log.Trace().Msg("🐞----------------------------------------")
 			// Edge Case: No worthy pairs
 			if len(gii) == 0 {
 				log.Info().
@@ -103,6 +113,17 @@ func ComputePlagiarism(
 			}
 
 			difficulty := bucketArtifacts[0].Difficulty
+
+			log.Trace().Msg("🐞----------------------------------------")
+			for _, artifact := range bucketArtifacts {
+				log.Trace().
+					Str("qId", qID).
+					Str("language", language).
+					Str("email", artifact.Email).
+					Str("attemptID", artifact.AttemptID).
+					Msg("artifact")
+			}
+			log.Trace().Msg("🐞----------------------------------------")
 
 			// Find worthy pairs
 			worthyPairs := GetWorthyPairs(gii, bucketArtifacts, difficulty)
@@ -116,6 +137,20 @@ func ComputePlagiarism(
 			}
 
 			// Process pairs in batches
+			log.Trace().Msg("+++++++++++++++++++++++++++++++++++++++++++")
+			log.Trace().
+				Str("qId", qID).
+				Str("language", language).
+				Msg("Processing pairs in batches")
+
+			for _, pair := range worthyPairs {
+				log.Trace().
+					Str("email", pair.ArtifactA.Email).
+					Str("plagiarist", pair.ArtifactB.Email).
+					Msg("worthy pair")
+			}
+			log.Trace().Msg("+++++++++++++++++++++++++++++++++++++++++++")
+
 			pairSimilarities := processPairsInBatches(
 				ctx,
 				worthyPairs,
@@ -125,10 +160,16 @@ func ComputePlagiarism(
 				batchSize,
 			)
 
-			// Filter pairs with FinalScore >= 0.55 (significant pairs)
+			// Filter pairs with FinalScore >= SignificantSimilarityThreshold (significant pairs)
 			significantPairs := make([]PairSimilarity, 0)
 			for _, ps := range pairSimilarities {
-				if ps.FinalScore >= 0.55 {
+				log.Trace().Msg("-------------------------------------------")
+				log.Trace().
+					Str("email", ps.ArtifactA.Email).
+					Str("plagiarist", ps.ArtifactB.Email).
+					Float64("finalScore", ps.FinalScore).
+					Msg("pair similarity")
+				if ps.FinalScore >= SignificantSimilarityThreshold {
 					significantPairs = append(significantPairs, ps)
 					// Track pairs for each candidate
 					candidatePairsMap[ps.ArtifactA.Email] = append(candidatePairsMap[ps.ArtifactA.Email], ps)
@@ -140,7 +181,7 @@ func ComputePlagiarism(
 		}
 	}
 
-	// Edge Case: Short-circuit stops (no pairs with FinalScore >= 0.55)
+	// Edge Case: Short-circuit stops (no pairs with FinalScore >= SignificantSimilarityThreshold)
 	if len(allPairSimilarities) == 0 {
 		return handleNoSignificantPairs(ctx, artifacts, resultsRepo, driveID)
 	}
@@ -183,7 +224,6 @@ func processPairsInBatches(
 	for len(resultsMap) < expectedResults {
 		select {
 		case <-ctx.Done():
-			// Return what we have so far
 			finalResults := make([]PairSimilarity, 0, len(resultsMap))
 			for _, result := range resultsMap {
 				finalResults = append(finalResults, result)
@@ -214,12 +254,34 @@ func groupByQuestionAndLanguage(artifacts []*models.Artifact) map[string]map[str
 	for _, artifact := range artifacts {
 		qID := artifact.QID
 		language := artifact.Language
-
+		log.Trace().
+			Str("qID", strconv.FormatInt(qID, 10)).
+			Str("email", artifact.Email).
+			Str("language", language).
+			Msg("grouping artifacts")
 		if buckets[strconv.FormatInt(qID, 10)] == nil {
 			buckets[strconv.FormatInt(qID, 10)] = make(map[string][]*models.Artifact)
 		}
 		buckets[strconv.FormatInt(qID, 10)][language] = append(buckets[strconv.FormatInt(qID, 10)][language], artifact)
 	}
+
+	log.Trace().Msg("----------------------------------------")
+	for qID, langBuckets := range buckets {
+		for language, bucketArtifacts := range langBuckets {
+			log.Trace().
+				Str("qID", qID).
+				Str("language", language).
+				Msg("lang buckets")
+			for _, artifact := range bucketArtifacts {
+				log.Trace().
+					Str("email", artifact.Email).
+					Str("attemptID", artifact.AttemptID).
+					Msg("artifact")
+				log.Trace().Msg(">>>>>>>>>>>>>>>>>>.")
+			}
+		}
+	}
+	log.Trace().Msg("----------------------------------------")
 
 	return buckets
 }
@@ -232,19 +294,19 @@ func handleSingleCandidate(
 	driveID string,
 ) error {
 	candidateResult := &models.CandidateResult{
-		Email:           artifact.Email,
-		AttemptID:       artifact.AttemptID,
-		DriveID:         driveID,
-		Risk:            "clean",
-		FlaggedQN:       []string{},
-		PlagiarismPeers: make(map[string][]string),
-		CodeSimilarity:  0,
-		AlgoSimilarity:  0,
-		Status:          "completed",
+		Email:            artifact.Email,
+		AttemptID:        artifact.AttemptID,
+		DriveID:          driveID,
+		Risk:             "clean",
+		FlaggedQN:        []string{},
+		PlagiarismPeers:  make(map[string][]string),
+		CodeSimilarity:   0,
+		AlgoSimilarity:   0,
+		PlagiarismStatus: "completed",
 	}
 
-	if err := resultsRepo.InsertCandidateResult(ctx, candidateResult); err != nil {
-		return fmt.Errorf("failed to insert candidate result: %w", err)
+	if err := resultsRepo.UpdateCandidateResult(ctx, candidateResult); err != nil {
+		return fmt.Errorf("failed to update candidate result: %w", err)
 	}
 
 	testReport := &models.TestReport{
@@ -254,8 +316,8 @@ func handleSingleCandidate(
 		FlaggedQN: []string{},
 	}
 
-	if err := resultsRepo.InsertTestReport(ctx, testReport); err != nil {
-		return fmt.Errorf("failed to insert test report: %w", err)
+	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
 	log.Debug().
@@ -282,19 +344,19 @@ func handleNoSignificantPairs(
 
 	for _, artifact := range uniqueCandidates {
 		candidateResult := &models.CandidateResult{
-			Email:           artifact.Email,
-			AttemptID:       artifact.AttemptID,
-			DriveID:         driveID,
-			Risk:            "clean",
-			FlaggedQN:       []string{},
-			PlagiarismPeers: make(map[string][]string),
-			CodeSimilarity:  0,
-			AlgoSimilarity:  0,
-			Status:          "completed",
+			Email:            artifact.Email,
+			AttemptID:        artifact.AttemptID,
+			DriveID:          driveID,
+			Risk:             "clean",
+			FlaggedQN:        []string{},
+			PlagiarismPeers:  make(map[string][]string),
+			CodeSimilarity:   0,
+			AlgoSimilarity:   0,
+			PlagiarismStatus: "completed",
 		}
 
-		if err := resultsRepo.InsertCandidateResult(ctx, candidateResult); err != nil {
-			return fmt.Errorf("failed to insert candidate result: %w", err)
+		if err := resultsRepo.UpdateCandidateResult(ctx, candidateResult); err != nil {
+			return fmt.Errorf("failed to update candidate result: %w", err)
 		}
 	}
 
@@ -305,8 +367,8 @@ func handleNoSignificantPairs(
 		FlaggedQN: []string{},
 	}
 
-	if err := resultsRepo.InsertTestReport(ctx, testReport); err != nil {
-		return fmt.Errorf("failed to insert test report: %w", err)
+	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
 	log.Info().
@@ -339,19 +401,22 @@ func aggregateResults(
 	flaggedCandidates := 0
 
 	for email, artifact := range uniqueCandidates {
+		log.Trace().
+			Str("email", email).
+			Msg("unique candidates")
 		pairs := candidatePairsMap[email]
 		if len(pairs) == 0 {
 			// No significant pairs for this candidate
 			candidateResult := &models.CandidateResult{
-				Email:           email,
-				AttemptID:       artifact.AttemptID,
-				DriveID:         driveID,
-				Risk:            "clean",
-				FlaggedQN:       []string{},
-				PlagiarismPeers: make(map[string][]string),
-				CodeSimilarity:  0,
-				AlgoSimilarity:  0,
-				Status:          "completed",
+				Email:            email,
+				AttemptID:        artifact.AttemptID,
+				DriveID:          driveID,
+				Risk:             "clean",
+				FlaggedQN:        []string{},
+				PlagiarismPeers:  make(map[string][]string),
+				CodeSimilarity:   0,
+				AlgoSimilarity:   0,
+				PlagiarismStatus: "completed",
 			}
 			candidateResults = append(candidateResults, candidateResult)
 			continue
@@ -382,10 +447,10 @@ func aggregateResults(
 			}
 
 			// Count similarities
-			if pair.FinalScore >= 0.55 {
+			if pair.FinalScore >= SignificantSimilarityThreshold {
 				codeSimilarity++
 			}
-			if pair.FinalScore >= 0.70 {
+			if pair.FinalScore >= AlgorithmicSimilarityThreshold {
 				algoSimilarity++
 			}
 		}
@@ -401,24 +466,23 @@ func aggregateResults(
 		}
 
 		candidateResult := &models.CandidateResult{
-			Email:           email,
-			AttemptID:       artifact.AttemptID,
-			DriveID:         driveID,
-			Risk:            risk,
-			FlaggedQN:       flaggedQNList,
-			PlagiarismPeers: plagiarismPeers,
-			CodeSimilarity:  codeSimilarity,
-			AlgoSimilarity:  algoSimilarity,
-			Status:          "completed",
+			Email:            email,
+			AttemptID:        artifact.AttemptID,
+			DriveID:          driveID,
+			Risk:             risk,
+			FlaggedQN:        flaggedQNList,
+			PlagiarismPeers:  plagiarismPeers,
+			CodeSimilarity:   codeSimilarity,
+			AlgoSimilarity:   algoSimilarity,
+			PlagiarismStatus: "completed",
 		}
 
 		candidateResults = append(candidateResults, candidateResult)
 	}
 
-	// Insert candidate results
 	for _, result := range candidateResults {
-		if err := resultsRepo.InsertCandidateResult(ctx, result); err != nil {
-			return fmt.Errorf("failed to insert candidate result: %w", err)
+		if err := resultsRepo.UpdateCandidateResult(ctx, result); err != nil {
+			return fmt.Errorf("failed to update candidate result: %w", err)
 		}
 	}
 
@@ -460,8 +524,8 @@ func aggregateResults(
 		FlaggedQN: flaggedQNList,
 	}
 
-	if err := resultsRepo.InsertTestReport(ctx, testReport); err != nil {
-		return fmt.Errorf("failed to insert test report: %w", err)
+	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
 	log.Info().

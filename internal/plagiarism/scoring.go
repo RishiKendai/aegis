@@ -5,6 +5,18 @@ import (
 	"sort"
 
 	"github.com/RishiKendai/aegis/internal/models"
+	"github.com/rs/zerolog/log"
+)
+
+const (
+	// SignificantSimilarityThreshold is the minimum FinalScore required for a pair
+	// to be considered significant (code similarity). Pairs below this threshold
+	// are filtered out as noise or coincidental similarity.
+	SignificantSimilarityThreshold = 0.55
+
+	// AlgorithmicSimilarityThreshold is the minimum FinalScore required for a pair
+	// to be considered algorithmic similarity (near-copy level).
+	AlgorithmicSimilarityThreshold = 0.70
 )
 
 // PairSimilarity represents similarity between a pair of artifacts
@@ -18,10 +30,9 @@ type PairSimilarity struct {
 
 // CandidateScore calculates candidate score using Top-K + boost formula
 func CandidateScore(pairs []PairSimilarity) float64 {
-	// Step 1: Filter pairs where FinalScore >= 0.55
 	significantPairs := make([]PairSimilarity, 0)
 	for _, pair := range pairs {
-		if pair.FinalScore >= 0.55 {
+		if pair.FinalScore >= SignificantSimilarityThreshold {
 			significantPairs = append(significantPairs, pair)
 		}
 	}
@@ -51,7 +62,7 @@ func CandidateScore(pairs []PairSimilarity) float64 {
 	candidateScore := sum / float64(K)
 
 	// Step 4: Frequency boost
-	// M = number of distinct candidates with FinalScore >= 0.55
+	// M = number of distinct candidates with FinalScore >= SignificantSimilarityThreshold
 	distinctCandidates := make(map[string]bool)
 	for _, pair := range significantPairs {
 		distinctCandidates[pair.ArtifactB.Email] = true
@@ -72,7 +83,9 @@ func CandidateScore(pairs []PairSimilarity) float64 {
 	if candidateScore < 0.0 {
 		candidateScore = 0.0
 	}
-
+	log.Trace().
+		Float64("candidateScore", candidateScore).
+		Msg("Candidate score")
 	return candidateScore
 }
 

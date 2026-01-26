@@ -1,7 +1,10 @@
 package plagiarism
 
 import (
+	"fmt"
+
 	"github.com/RishiKendai/aegis/internal/models"
+	"github.com/rs/zerolog/log"
 )
 
 // SimilarityScores holds scores from all algorithms
@@ -26,19 +29,17 @@ func CascadePipeline(artifactA, artifactB *models.Artifact, difficulty string) *
 		Scores: SimilarityScores{},
 	}
 
-	// Get weights based on difficulty
 	weights := getWeights(difficulty)
 
 	// Initialize accumulated score
 	currentScore := 0.0
 	remainingMax := weights.Fingerprint + weights.Token + weights.AST + weights.CFG
 
-	// 1. Fingerprint (coarsest, fastest)
+	// 1. Fingerprint
 	result.Scores.Fingerprint = FingerprintSimilarity(artifactA, artifactB)
 	currentScore += result.Scores.Fingerprint * weights.Fingerprint
 	remainingMax -= weights.Fingerprint
 	layerThreshold := getThreshold(difficulty, "fingerprint")
-
 	if shouldShortCircuit(currentScore, remainingMax, layerThreshold) {
 		result.ShortCircuited = true
 		result.FinalScore = currentScore
@@ -50,7 +51,6 @@ func CascadePipeline(artifactA, artifactB *models.Artifact, difficulty string) *
 	currentScore += result.Scores.Token * weights.Token
 	remainingMax -= weights.Token
 	layerThreshold = getThreshold(difficulty, "token")
-
 	if shouldShortCircuit(currentScore, remainingMax, layerThreshold) {
 		result.ShortCircuited = true
 		result.FinalScore = currentScore
@@ -62,7 +62,6 @@ func CascadePipeline(artifactA, artifactB *models.Artifact, difficulty string) *
 	currentScore += result.Scores.AST * weights.AST
 	remainingMax -= weights.AST
 	layerThreshold = getThreshold(difficulty, "ast")
-
 	if shouldShortCircuit(currentScore, remainingMax, layerThreshold) {
 		result.ShortCircuited = true
 		result.FinalScore = currentScore
@@ -72,6 +71,17 @@ func CascadePipeline(artifactA, artifactB *models.Artifact, difficulty string) *
 	// 4. CFG (finest, slowest)
 	result.Scores.CFG = CFGSimilarity(artifactA, artifactB)
 	currentScore += result.Scores.CFG * weights.CFG
+	remainingMax -= weights.CFG
+	layerThreshold = getThreshold(difficulty, "cfg")
+	log.Trace().
+		Str("candidate", artifactA.Email).
+		Str("plagiarist", artifactB.Email).
+		Str("difficulty", difficulty).
+		Float64("currentScore", currentScore).
+		Float64("remainingMax", remainingMax).
+		Float64("layerThreshold", layerThreshold).
+		Msg("CFG similarity")
+	fmt.Println("-------------------------------------------")
 	result.FinalScore = currentScore
 
 	return result
