@@ -170,15 +170,14 @@ func (h *Handler) processComputation(driveID string) {
 }
 
 func (h *Handler) createFailedReport(ctx context.Context, driveID, errorMsg string) {
-	failedReport := &models.TestReport{
+	err := h.resultsRepo.UpdateTestReportByDriveID(ctx, driveID, &models.TestReport{
 		DriveID:   driveID,
 		Risk:      "",
 		Status:    "failed",
 		FlaggedQN: []string{},
-	}
-
-	if err := h.resultsRepo.InsertTestReport(ctx, failedReport); err != nil {
-		log.Error().Err(err).Str("driveId", driveID).Msg("Failed to create failed report")
+	})
+	if err != nil {
+		log.Error().Err(err).Str("driveId", driveID).Msg("Failed to update failed report")
 	}
 }
 

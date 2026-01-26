@@ -37,14 +37,7 @@ func FingerprintSimilarity(artifactA, artifactB *models.Artifact) float64 {
 	}
 
 	// FP_Score = shared_hashes / min(total_hashes_A, total_hashes_B)
-	minTotal := totalA
-	if totalB < minTotal {
-		minTotal = totalB
-	}
-
-	if minTotal == 0 {
-		return 0.0
-	}
+	minTotal := min(totalA, totalB)
 
 	return float64(sharedCount) / float64(minTotal)
 }

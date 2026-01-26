@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/RishiKendai/aegis/internal/models"
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -48,6 +49,39 @@ func (r *ResultsRepository) InsertTestReport(ctx context.Context, report *models
 	return nil
 }
 
+func (r *ResultsRepository) UpdateTestReportByDriveID(ctx context.Context, driveID string, report *models.TestReport) error {
+	filter := bson.M{"driveId": driveID}
+	update := bson.M{
+		"$set": bson.M{
+			"risk":       report.Risk,
+			"status":     report.Status,
+			"flagged_qn": report.FlaggedQN,
+		},
+	}
+
+	opts := options.Update().SetUpsert(true)
+	result, err := r.mongoRepo.UpdateOne(ctx, reportsCollection, filter, update, opts)
+	if err != nil {
+		return fmt.Errorf("failed to update test report: %w", err)
+	}
+
+	// If this was an insert (upsert), set CreatedAt
+	if result.UpsertedCount > 0 {
+		// Update the CreatedAt field for the newly inserted document
+		updateCreatedAt := bson.M{
+			"$set": bson.M{
+				"createdAt": time.Now(),
+			},
+		}
+		_, err = r.mongoRepo.UpdateOne(ctx, reportsCollection, filter, updateCreatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to set createdAt for test report: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (r *ResultsRepository) GetLatestReportByDriveID(ctx context.Context, driveID string) (*models.TestReport, error) {
 	filter := bson.M{"driveId": driveID}
 
@@ -77,4 +111,40 @@ func (r *ResultsRepository) GetCandidateResultByDriveIDAndEmail(ctx context.Cont
 	}
 
 	return &result, nil
+}
+
+func (r *ResultsRepository) UpdateCandidateResult(ctx context.Context, result *models.CandidateResult) error {
+	log.Trace().
+		Str("attemptID", result.AttemptID).
+		Msg("here1")
+	filter := bson.M{
+		"attemptID": result.AttemptID,
+		"driveId":   result.DriveID,
+	}
+
+	updateOps := bson.M{
+		"$set": bson.M{
+			"risk":              result.Risk,
+			"code_similarity":   result.CodeSimilarity,
+			"algo_similarity":   result.AlgoSimilarity,
+			"plagiarism_status": result.PlagiarismStatus,
+			"flagged_qn":        result.FlaggedQN,
+			"plagiarism_peers":  result.PlagiarismPeers,
+		},
+	}
+
+	updateResult, err := r.mongoRepo.UpdateOne(ctx, resultsCollection, filter, updateOps)
+	if err != nil {
+		log.Trace().
+			Str("attemptID", result.AttemptID).
+			Msg("Error")
+		return fmt.Errorf("failed to update candidate result: %w", err)
+	}
+
+	// Check if document was found and updated
+	if updateResult.MatchedCount == 0 {
+		return fmt.Errorf("candidate result not found for attemptId: %s, driveId: %s", result.AttemptID, result.DriveID)
+	}
+
+	return nil
 }

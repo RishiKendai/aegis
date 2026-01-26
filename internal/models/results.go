@@ -5,7 +5,7 @@ import "time"
 // Artifact represents a plagiarism artifact stored in MongoDB
 type Artifact struct {
 	Email            string        `bson:"email" json:"email"`
-	AttemptID        string        `bson:"attemptId" json:"attemptId"`
+	AttemptID        string        `bson:"attemptID" json:"attemptID"`
 	TestID           string        `bson:"testId" json:"testId"`
 	DriveID          string        `bson:"driveId" json:"driveId"`
 	Difficulty       string        `bson:"difficulty" json:"difficulty"`
@@ -23,16 +23,16 @@ type Artifact struct {
 
 // CandidateResult represents a candidate's plagiarism result
 type CandidateResult struct {
-	Email           string              `bson:"email" json:"email"`
-	AttemptID       string              `bson:"attemptId" json:"attemptId"`
-	DriveID         string              `bson:"driveId" json:"driveId"`
-	Risk            string              `bson:"risk" json:"risk"` // clean, suspicious, highly suspicious, Near copy
-	FlaggedQN       []string            `bson:"flagged_qn" json:"flagged_qn"`
-	PlagiarismPeers map[string][]string `bson:"plagiarism_peers" json:"plagiarism_peers"` // qId -> []attemptId
-	CodeSimilarity  int                 `bson:"code_similarity" json:"code_similarity"`
-	AlgoSimilarity  int                 `bson:"algo_similarity" json:"algo_similarity"`
-	Status          string              `bson:"status" json:"status"` // pending, completed, failed
-	CreatedAt       time.Time           `bson:"createdAt" json:"createdAt"`
+	Email            string              `bson:"email" json:"email"`
+	AttemptID        string              `bson:"attemptID" json:"attemptID"`
+	DriveID          string              `bson:"driveId" json:"driveId"`
+	Risk             string              `bson:"risk" json:"risk"` // clean, suspicious, highly suspicious, Near copy
+	FlaggedQN        []string            `bson:"flagged_qn" json:"flagged_qn"`
+	PlagiarismPeers  map[string][]string `bson:"plagiarism_peers" json:"plagiarism_peers"` // qId -> []attemptId
+	CodeSimilarity   int                 `bson:"code_similarity" json:"code_similarity"`
+	AlgoSimilarity   int                 `bson:"algo_similarity" json:"algo_similarity"`
+	PlagiarismStatus string              `bson:"plagiarism_status" json:"plagiarism_status"` // pending, completed, failed
+	CreatedAt        time.Time           `bson:"createdAt" json:"createdAt"`
 }
 
 // TestReport represents an overall test plagiarism report

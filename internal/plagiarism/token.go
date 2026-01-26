@@ -4,7 +4,9 @@ import (
 	"github.com/RishiKendai/aegis/internal/models"
 )
 
-// TokenSimilarity calculates similarity using Greedy String Tiling (GST)
+const minLength = 5
+
+// calculate similarity using Greedy String Tiling (GST)
 func TokenSimilarity(artifactA, artifactB *models.Artifact) float64 {
 	tokensA := artifactA.NormalizedTokens
 	tokensB := artifactB.NormalizedTokens
@@ -14,19 +16,15 @@ func TokenSimilarity(artifactA, artifactB *models.Artifact) float64 {
 	}
 
 	// Find maximal common token substrings (min length ≥ 5)
-	matchedTokens := greedyStringTiling(tokensA, tokensB, 5)
+	matchedTokens := greedyStringTiling(tokensA, tokensB, minLength)
 
 	// TokenScore = 2 * matched_tokens / (lenA + lenB)
 	totalLen := len(tokensA) + len(tokensB)
-	if totalLen == 0 {
-		return 0.0
-	}
 
 	return 2.0 * float64(matchedTokens) / float64(totalLen)
 }
 
-// greedyStringTiling implements the Greedy String Tiling algorithm
-// Returns the number of matched tokens
+// Greedy String Tiling algorithm
 func greedyStringTiling(tokensA, tokensB []string, minLength int) int {
 	matched := make([]bool, len(tokensA))
 	matchedB := make([]bool, len(tokensB))
