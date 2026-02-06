@@ -88,7 +88,7 @@ func (h *Handler) Compute(c *gin.Context) {
 	if count == 0 {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "No artifacts found for driveId",
-			Code:  "DRIVE_ID_NOT_FOUND",
+			Code:  "NO_ARTIFACTS",
 		})
 		return
 	}
