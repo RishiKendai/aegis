@@ -14,6 +14,7 @@ const (
 	StepFiltering     Step = "filtering"
 	StepDeepAnalysis  Step = "deep_analysis"
 	StepCompleted     Step = "completed"
+	StepFailed        Step = "failed"
 )
 
 // Artifact represents a plagiarism artifact stored in MongoDB

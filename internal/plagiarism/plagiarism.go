@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/RishiKendai/aegis/internal/infra/redis"
+	"github.com/RishiKendai/aegis/internal/metrics"
 	"github.com/RishiKendai/aegis/internal/models"
 	"github.com/RishiKendai/aegis/internal/repository"
 	"github.com/rs/zerolog/log"
@@ -98,7 +100,7 @@ func ComputePlagiarism(
 
 	// Process each bucket
 	allPairSimilarities := make([]PairSimilarity, 0)
-	candidatePairsMap := make(map[string][]PairSimilarity) // email -> []PairSimilarity
+	candidatePairsMap := make(map[string][]PairSimilarity) // attemptID -> []PairSimilarity
 	deepAnalysisStatusUpdated := false
 
 	for qID, langBuckets := range buckets {
@@ -151,8 +153,8 @@ func ComputePlagiarism(
 				if ps.FinalScore >= SignificantSimilarityThreshold {
 					significantPairs = append(significantPairs, ps)
 					// Track pairs for each candidate
-					candidatePairsMap[ps.ArtifactA.Email] = append(candidatePairsMap[ps.ArtifactA.Email], ps)
-					candidatePairsMap[ps.ArtifactB.Email] = append(candidatePairsMap[ps.ArtifactB.Email], ps)
+					candidatePairsMap[ps.ArtifactA.AttemptID] = append(candidatePairsMap[ps.ArtifactA.AttemptID], ps)
+					candidatePairsMap[ps.ArtifactB.AttemptID] = append(candidatePairsMap[ps.ArtifactB.AttemptID], ps)
 				}
 			}
 
@@ -263,6 +265,21 @@ func handleSingleCandidate(
 	}
 
 	if err := resultsRepo.UpdateCandidateResult(ctx, candidateResult); err != nil {
+		// Check if it's a "not found" error
+		if strings.Contains(err.Error(), "not found") {
+			metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_candidate_reports").Inc()
+		} else {
+			// Track failed to update candidate result (non-not-found errors)
+			metrics.InvalidSubmissionsTotal.WithLabelValues("failed_to_update_candidate_result").Inc()
+		}
+		if updateErr := UpdateStatus(ctx, redisClient, driveID, models.StepFailed); updateErr != nil {
+			log.Warn().Err(updateErr).Str("driveId", driveID).Msg("Failed to update Redis status to failed")
+		}
+		log.Debug().
+			Err(err).
+			Str("driveId", driveID).
+			Str("attemptID", candidateResult.AttemptID).
+			Msg("Failed to update candidate result")
 		return fmt.Errorf("failed to update candidate result: %w", err)
 	}
 
@@ -276,6 +293,9 @@ func handleSingleCandidate(
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_document_plagiarism_reports").Inc()
+		}
 		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
@@ -302,8 +322,8 @@ func handleNoSignificantPairs(
 	// Create "safe" results for all candidates
 	uniqueCandidates := make(map[string]*models.Artifact)
 	for _, artifact := range artifacts {
-		if _, exists := uniqueCandidates[artifact.Email]; !exists {
-			uniqueCandidates[artifact.Email] = artifact
+		if _, exists := uniqueCandidates[artifact.AttemptID]; !exists {
+			uniqueCandidates[artifact.AttemptID] = artifact
 		}
 	}
 
@@ -321,6 +341,21 @@ func handleNoSignificantPairs(
 		}
 
 		if err := resultsRepo.UpdateCandidateResult(ctx, candidateResult); err != nil {
+			// Check if it's a "not found" error
+			if strings.Contains(err.Error(), "not found") {
+				metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_candidate_reports").Inc()
+			} else {
+				// Track failed to update candidate result (non-not-found errors)
+				metrics.InvalidSubmissionsTotal.WithLabelValues("failed_to_update_candidate_result").Inc()
+			}
+			if updateErr := UpdateStatus(ctx, redisClient, driveID, models.StepFailed); updateErr != nil {
+				log.Warn().Err(updateErr).Str("driveId", driveID).Msg("Failed to update Redis status to failed")
+			}
+			log.Debug().
+				Err(err).
+				Str("driveId", driveID).
+				Str("attemptID", candidateResult.AttemptID).
+				Msg("Failed to update candidate result")
 			return fmt.Errorf("failed to update candidate result: %w", err)
 		}
 	}
@@ -336,6 +371,9 @@ func handleNoSignificantPairs(
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_document_plagiarism_reports").Inc()
+		}
 		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
@@ -364,8 +402,10 @@ func aggregateResults(
 	// Get unique candidates
 	uniqueCandidates := make(map[string]*models.Artifact)
 	for _, artifact := range artifacts {
-		if _, exists := uniqueCandidates[artifact.Email]; !exists {
-			uniqueCandidates[artifact.Email] = artifact
+		log.Trace().Msgf("artifactC: %+v", artifact)
+		log.Trace().Msg("------------------------")
+		if _, exists := uniqueCandidates[artifact.AttemptID]; !exists {
+			uniqueCandidates[artifact.AttemptID] = artifact
 		}
 	}
 
@@ -374,15 +414,15 @@ func aggregateResults(
 	flaggedQNs := make(map[string]bool)
 	flaggedCandidates := 0
 
-	for email, artifact := range uniqueCandidates {
+	for attemptID, artifact := range uniqueCandidates {
 		log.Trace().
-			Str("email", email).
+			Str("attemptID", attemptID).
 			Msg("unique candidates")
-		pairs := candidatePairsMap[email]
+		pairs := candidatePairsMap[attemptID]
 		if len(pairs) == 0 {
 			// No significant pairs for this candidate
 			candidateResult := &models.CandidateResult{
-				Email:            email,
+				Email:            artifact.Email,
 				AttemptID:        artifact.AttemptID,
 				DriveID:          driveID,
 				Risk:             RiskClean,
@@ -414,7 +454,7 @@ func aggregateResults(
 			}
 
 			// Add peer
-			if pair.ArtifactA.Email == email {
+			if pair.ArtifactA.AttemptID == attemptID {
 				plagiarismPeers[pair.QID] = append(plagiarismPeers[pair.QID], pair.ArtifactB.AttemptID)
 			} else {
 				plagiarismPeers[pair.QID] = append(plagiarismPeers[pair.QID], pair.ArtifactA.AttemptID)
@@ -440,7 +480,7 @@ func aggregateResults(
 		}
 
 		candidateResult := &models.CandidateResult{
-			Email:            email,
+			Email:            artifact.Email,
 			AttemptID:        artifact.AttemptID,
 			DriveID:          driveID,
 			Risk:             risk,
@@ -451,11 +491,31 @@ func aggregateResults(
 			PlagiarismStatus: "completed",
 		}
 
+		// Track high plagiarisms (count individual candidates with RiskHighlySuspicious or RiskNearCopy)
+		if risk == RiskHighlySuspicious || risk == RiskNearCopy {
+			metrics.HighPlagiarismsDetected.WithLabelValues(driveID).Inc()
+		}
+
 		candidateResults = append(candidateResults, candidateResult)
 	}
 
 	for _, result := range candidateResults {
 		if err := resultsRepo.UpdateCandidateResult(ctx, result); err != nil {
+			// Check if it's a "not found" error
+			if strings.Contains(err.Error(), "not found") {
+				metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_candidate_reports").Inc()
+			} else {
+				// Track failed to update candidate result (non-not-found errors)
+				metrics.InvalidSubmissionsTotal.WithLabelValues("failed_to_update_candidate_result").Inc()
+			}
+			if updateErr := UpdateStatus(ctx, redisClient, driveID, models.StepFailed); updateErr != nil {
+				log.Warn().Err(updateErr).Str("driveId", driveID).Msg("Failed to update Redis status to failed")
+			}
+			log.Debug().
+				Err(err).
+				Str("driveId", driveID).
+				Str("attemptID", result.AttemptID).
+				Msg("Failed to update candidate result")
 			return fmt.Errorf("failed to update candidate result: %w", err)
 		}
 	}
@@ -501,6 +561,9 @@ func aggregateResults(
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			metrics.InvalidSubmissionsTotal.WithLabelValues("mongo_no_document_plagiarism_reports").Inc()
+		}
 		return fmt.Errorf("failed to update test report: %w", err)
 	}
 

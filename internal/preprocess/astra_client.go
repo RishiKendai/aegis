@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/RishiKendai/aegis/internal/metrics"
 	"github.com/RishiKendai/aegis/internal/models"
 	"github.com/rs/zerolog/log"
 )
@@ -41,6 +42,7 @@ type PreprocessRequest struct {
 }
 
 func (c *AstraClient) Preprocess(ctx context.Context, req *PreprocessRequest) (*models.PreprocessingResponse, error) {
+	metrics.PreprocessRequestsTotal.Inc()
 	url := fmt.Sprintf("%s/api/v1/preprocess", c.baseURL)
 
 	reqBody, err := json.Marshal(req)
@@ -78,6 +80,7 @@ func (c *AstraClient) Preprocess(ctx context.Context, req *PreprocessRequest) (*
 	if resp.StatusCode == http.StatusBadRequest ||
 		resp.StatusCode == http.StatusUnsupportedMediaType ||
 		resp.StatusCode == http.StatusUnprocessableEntity {
+		metrics.InvalidSubmissionsTotal.WithLabelValues("astra_preprocess_error").Inc()
 		var errResp models.PreprocessingError
 		if err := json.Unmarshal(body, &errResp); err != nil {
 			return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
@@ -86,6 +89,7 @@ func (c *AstraClient) Preprocess(ctx context.Context, req *PreprocessRequest) (*
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		metrics.InvalidSubmissionsTotal.WithLabelValues("astra_preprocess_error").Inc()
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 

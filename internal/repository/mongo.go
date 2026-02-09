@@ -24,15 +24,18 @@ func (r *MongoRepository) InsertOne(ctx context.Context, collection string, docu
 }
 
 func (r *MongoRepository) FindOne(ctx context.Context, collection string, filter interface{}, opts ...*options.FindOneOptions) *mongo.SingleResult {
-	return r.db.Collection(collection).FindOne(ctx, filter, opts...)
+	result := r.db.Collection(collection).FindOne(ctx, filter, opts...)
+	return result
 }
 
 func (r *MongoRepository) FindMany(ctx context.Context, collection string, filter interface{}, opts ...*options.FindOptions) (*mongo.Cursor, error) {
-	return r.db.Collection(collection).Find(ctx, filter, opts...)
+	cursor, err := r.db.Collection(collection).Find(ctx, filter, opts...)
+	return cursor, err
 }
 
 func (r *MongoRepository) CountDocuments(ctx context.Context, collection string, filter interface{}, opts ...*options.CountOptions) (int64, error) {
-	return r.db.Collection(collection).CountDocuments(ctx, filter, opts...)
+	count, err := r.db.Collection(collection).CountDocuments(ctx, filter, opts...)
+	return count, err
 }
 
 func (r *MongoRepository) GetCollection(collectionName string) *mongo.Collection {
@@ -40,5 +43,6 @@ func (r *MongoRepository) GetCollection(collectionName string) *mongo.Collection
 }
 
 func (r *MongoRepository) UpdateOne(ctx context.Context, collection string, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
-	return r.db.Collection(collection).UpdateOne(ctx, filter, update, opts...)
+	result, err := r.db.Collection(collection).UpdateOne(ctx, filter, update, opts...)
+	return result, err
 }

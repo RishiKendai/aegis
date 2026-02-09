@@ -8,6 +8,7 @@ import (
 
 	"github.com/RishiKendai/aegis/internal/config"
 	"github.com/RishiKendai/aegis/internal/infra/redis"
+	"github.com/RishiKendai/aegis/internal/metrics"
 	"github.com/RishiKendai/aegis/internal/models"
 	"github.com/RishiKendai/aegis/internal/plagiarism"
 	"github.com/RishiKendai/aegis/internal/repository"
@@ -55,8 +56,11 @@ func (h *Handler) Health(c *gin.Context) {
 }
 
 func (h *Handler) Compute(c *gin.Context) {
+	metrics.ComputeRequestsTotal.Inc()
+
 	var req models.ComputeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		metrics.InvalidSubmissionsTotal.WithLabelValues("invalid_request_body").Inc()
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "Invalid request body",
 			Code:  "INVALID_REQUEST",
@@ -66,6 +70,7 @@ func (h *Handler) Compute(c *gin.Context) {
 
 	// Input validation
 	if err := validateComputePayload(req); err != nil {
+		metrics.InvalidSubmissionsTotal.WithLabelValues("missing_drive_id").Inc()
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: err.Error(),
 			Code:  "INVALID_DRIVE_ID",
@@ -86,6 +91,7 @@ func (h *Handler) Compute(c *gin.Context) {
 	}
 
 	if count == 0 {
+		metrics.InvalidSubmissionsTotal.WithLabelValues("no_artifacts").Inc()
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "No artifacts found for driveId",
 			Code:  "NO_ARTIFACTS",
@@ -109,6 +115,11 @@ func (h *Handler) Compute(c *gin.Context) {
 		if err := plagiarism.UpdateStatus(ctx, h.redisClient, req.DriveID, models.StepCompleted); err != nil {
 			log.Warn().Err(err).Str("driveId", req.DriveID).Msg("Failed to update completed status")
 		}
+		c.JSON(http.StatusOK, models.ComputeResponse{
+			Step:   models.StepCompleted,
+			TestID: req.DriveID,
+		})
+		return
 	}
 
 	// Acquire semaphore (bounded concurrency)
@@ -156,11 +167,12 @@ func (h *Handler) processComputation(driveID string) {
 		TotalAnalyzed:     0,
 	}
 
-	if err := h.resultsRepo.InsertTestReport(ctx, pendingReport); err != nil {
-		log.Error().Err(err).Str("driveId", driveID).Msg("Failed to create pending report")
+	if err := h.resultsRepo.UpsertPlagiarismStatus(ctx, pendingReport, driveID); err != nil {
+		log.Error().Err(err).Str("driveId", driveID).Msg("Failed to upsert pending report")
 	}
 
-	// Process computation
+	// Process computation and track duration
+	computationStart := time.Now()
 	err := plagiarism.ComputePlagiarism(
 		ctx,
 		driveID,
@@ -170,6 +182,7 @@ func (h *Handler) processComputation(driveID string) {
 		h.redisClient,
 		h.cfg.BatchSize,
 	)
+	metrics.PlagiarismComputationDuration.Observe(time.Since(computationStart).Seconds())
 
 	if err != nil {
 		log.Error().Err(err).Str("driveId", driveID).Msg("Computation failed")

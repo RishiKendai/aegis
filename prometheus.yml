@@ -1,0 +1,71 @@
+# Prometheus configuration for Aegis service
+#
+# Usage:
+#   1. If running Prometheus in Docker:
+#      docker run -d --name prometheus -p 9090:9090 \
+#        -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
+#        prom/prometheus
+#
+#   2. If running Prometheus locally:
+#      prometheus --config.file=prometheus.yml
+#
+#   3. Access Prometheus UI at http://localhost:9090
+#
+# Note: Update the target address based on your setup:
+#   - host.docker.internal:8080 (Prometheus in Docker, Aegis on host)
+#   - aegis:8080 (Both in Docker, same network)
+#   - localhost:8080 (Both running locally on host)
+
+global:
+  scrape_interval: 15s      # Scrape targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  external_labels:
+    cluster: 'aegis'
+    environment: 'local'
+
+# Alertmanager configuration (optional - uncomment if using Alertmanager)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           # - alertmanager:9093
+
+# Load rules once and periodically evaluate them (optional)
+# rule_files:
+#   # - "first_rules.yml"
+#   # - "second_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Scrape Aegis service metrics
+  - job_name: 'aegis'
+    scrape_interval: 5s
+    # scrape_timeout: 10s
+    metrics_path: '/metrics'
+    scheme: 'http'
+    static_configs:
+      # For local development (Aegis running on host)
+      - targets: ['host.docker.internal:2112']
+        labels:
+          service: 'aegis'
+          instance: 'aegis-local'
+          environment: 'development'
+      # Alternative: If Aegis is running in Docker on same network
+      # - targets: ['aegis:8080']
+      #   labels:
+      #     service: 'aegis'
+      #     instance: 'aegis-docker'
+      #     environment: 'development'
+      # Alternative: If Aegis is running on localhost (Prometheus on host)
+      # - targets: ['localhost:8080']
+      #   labels:
+      #     service: 'aegis'
+      #     instance: 'aegis-host'
+      #     environment: 'development'
+
+  # Optional: Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'

@@ -19,6 +19,7 @@ func UpdateStatus(ctx context.Context, redisClient *redis.Client, driveID string
 		models.StepFiltering:     true,
 		models.StepDeepAnalysis:  true,
 		models.StepCompleted:     true,
+		models.StepFailed:        true,
 	}
 	if !validSteps[step] {
 		return fmt.Errorf("unknown step: %s", step)
