@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,11 +15,13 @@ import (
 	"github.com/RishiKendai/aegis/internal/infra/mongo"
 	redisInfra "github.com/RishiKendai/aegis/internal/infra/redis"
 	"github.com/RishiKendai/aegis/internal/logger"
+	"github.com/RishiKendai/aegis/internal/metrics"
 	"github.com/RishiKendai/aegis/internal/plagiarism"
 	"github.com/RishiKendai/aegis/internal/preprocess"
 	"github.com/RishiKendai/aegis/internal/repository"
 	"github.com/RishiKendai/aegis/internal/stream"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -38,6 +41,24 @@ func main() {
 
 	logger.Init(cfg.LogLevel)
 	log.Info().Msg("Starting AEGIS server")
+
+	// Initialize Prometheus metrics
+	metrics.InitPrometheus()
+	log.Info().Msg("Prometheus metrics initialized")
+
+	// Start metrics server in separate goroutine on port 2112
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:    ":2112",
+		Handler: metricsMux,
+	}
+	go func() {
+		log.Info().Str("port", "2112").Msg("Metrics server started")
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Metrics server failed to start")
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -123,6 +144,13 @@ func main() {
 	// Shutdown Gin server gracefully
 	if err := api.ShutdownServer(srv, 30*time.Second); err != nil {
 		log.Error().Err(err).Msg("Error shutting down Gin server")
+	}
+
+	// Shutdown metrics server gracefully
+	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer metricsCancel()
+	if err := metricsServer.Shutdown(metricsCtx); err != nil {
+		log.Error().Err(err).Msg("Error shutting down metrics server")
 	}
 
 	// Close worker pool
