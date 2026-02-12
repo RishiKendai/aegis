@@ -41,7 +41,7 @@ func main() {
 
 	logger.Init(cfg.LogLevel)
 	log.Info().Msg("Starting AEGIS server")
-
+	log.Trace().Msg("🚀 Starting AEGIS server")
 	// Initialize Prometheus metrics
 	metrics.InitPrometheus()
 	log.Info().Msg("Prometheus metrics initialized")
@@ -152,9 +152,6 @@ func main() {
 	if err := metricsServer.Shutdown(metricsCtx); err != nil {
 		log.Error().Err(err).Msg("Error shutting down metrics server")
 	}
-
-	// Close worker pool
-	workerPool.Close()
 
 	log.Info().Msg("Shutdown complete")
 }

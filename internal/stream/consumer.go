@@ -72,9 +72,14 @@ func (c *Consumer) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info().Msg("Consumer context canceled, shutting down gracefully")
 			return ctx.Err()
 		default:
 			if err := c.consume(ctx); err != nil {
+				if err == context.Canceled || err == context.DeadlineExceeded {
+					log.Debug().Msg("Consumer stopping due to context cancellation")
+					return err
+				}
 				log.Error().Err(err).Msg("Error consuming messages")
 				time.Sleep(1 * time.Second) // Brief pause before retrying
 			}
@@ -211,6 +216,10 @@ func (c *Consumer) recoverPEL(ctx context.Context) error {
 }
 
 func (c *Consumer) consume(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	// Periodically check for PEL messages (every 30 seconds)
 	if time.Since(c.lastPELCheck) > c.pelRecoveryInterval {
 		if err := c.recoverPEL(ctx); err != nil {
@@ -231,6 +240,9 @@ func (c *Consumer) consume(ctx context.Context) error {
 		return nil // No messages available
 	}
 	if err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return err
+		}
 		if c.isStreamMissing(err) {
 			if recreateErr := c.ensureStreamExists(ctx); recreateErr != nil {
 				return fmt.Errorf("failed to recreate stream: %w", recreateErr)
